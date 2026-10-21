@@ -1,0 +1,14 @@
+#Visual studio
+.vs/
+**/.vs/
+
+# Build Output
+bin/
+obj/
+
+# User-specific files
+*.User
+*.suo
+
+# sensitive configuration
+appsettings.json
