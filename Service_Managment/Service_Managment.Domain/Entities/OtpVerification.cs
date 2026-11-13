@@ -1,6 +1,4 @@
-﻿using System;
-using System.ComponentModel.DataAnnotations;
-using Service_Managment.Domain.Enum;
+﻿using System.ComponentModel.DataAnnotations;
 
 namespace Service_Managment.Domain.Entities
 {
@@ -9,11 +7,11 @@ namespace Service_Managment.Domain.Entities
         [Key]
         public int OtpId { get; set; }
         public int AppointmentId { get; set; }
-        public Appointment Appointment { get; set; }
-        public string Code { get; set; }
-        public bool IsVerified { get; set; }
-        public int? VerifiedBy { get; set; }
-        public DateTime? VerifiedAt { get; set; }
-        public DateTime GeneratedAt { get; set; }
+        public Appointment Appointment { get; set; } = null!;
+        public string OtpHash { get; set; } = string.Empty;
+        public DateTime ExpiresAt { get; set; }
+        public bool IsUsed { get; set; }
+        public int FailedAttempts { get; set; }
+        public DateTime CreatedAt { get; set; }
     }
 }

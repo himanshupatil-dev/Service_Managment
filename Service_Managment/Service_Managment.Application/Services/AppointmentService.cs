@@ -1,498 +1,197 @@
-﻿using Service_Managment.Application.DTOs;
+using System.Security.Cryptography;
+using System.Text;
+using Microsoft.Extensions.Configuration;
+using Service_Managment.Application.DTOs;
 using Service_Managment.Application.Interface;
 using Service_Managment.Domain.Entities;
 using Service_Managment.Domain.Enum;
 using Service_Managment.Domain.Enum.Service_Managment.Domain.Enum;
-using System;
-using System.Collections.Generic;
-using System.ComponentModel.DataAnnotations;
-using System.Security.Claims;
-using System.Security.Cryptography;
-using System.Text;
-using System.Threading.Tasks;
 
+namespace Service_Managment.Application.Services;
 
-namespace Service_Managment.Application.Services
+public class AppointmentService : IAppointmentService
 {
-    public class AppointmentService : IAppointmentService
+    private const string CodeNotificationPrefix = "AppointmentStartCode:";
+    private readonly IAppointmentRepository _appointments;
+    private readonly IGenericRepository<Worker> _workers;
+    private readonly IGenericRepository<OtpVerification> _codes;
+    private readonly IGenericRepository<Notification> _notifications;
+    private readonly int _expiryMinutes;
+    private readonly int _maxAttempts;
+
+    public AppointmentService(IAppointmentRepository appointments, IGenericRepository<Worker> workers,
+        IGenericRepository<OtpVerification> codes, IGenericRepository<Notification> notifications,
+        IConfiguration configuration)
     {
-        private readonly IAppointmentRepository _appointmentRepository;
-        private readonly IGenericRepository<Worker> _genericRepository;
-        private readonly IGenericRepository<OtpVerification> _otpVerification;
-        
-
-        public AppointmentService(
-            IAppointmentRepository appointmentRepository,
-            IGenericRepository<Worker> genericRepository,
-            IGenericRepository<OtpVerification> otpVerification)
-        {
-            _appointmentRepository = appointmentRepository;
-            _genericRepository = genericRepository;
-            _otpVerification = otpVerification;
-        }
-
-        public async Task<AppointmentResponse> BookAppointmentAsync(BookAppointmentRequest request, int userId)
-        {
-            var worker = await _genericRepository.GetByIdAsync(request.WorkerId);
-
-            if (worker == null)
-            {
-                throw new InvalidOperationException("Worker not found");
-            }
-
-            if(userId == worker.UserId)
-            {
-                throw new InvalidOperationException("User cannot book an appointment with themselves");
-            }
-
-            if (!worker.IsAvailable)
-            {
-                throw new InvalidOperationException("Worker is not available");
-            }
-
-            if (await _appointmentRepository.HasActiveAppointmentAsync(request.WorkerId ))
-            {
-                throw new InvalidOperationException(
-                    "Worker already has an active appointment");
-            }
-
-            var newAppointment = new Appointment
-            {
-                UserId = userId,
-                WorkerId = request.WorkerId,
-                ProblemDescription = request.ProblemDescription,
-                PartsRequired = request.PartsRequired,
-                Status = Domain.Enum.Service_Managment.Domain.Enum.Status.Pending,
-                //Otp = request.OtpCode,
-                CreatedAt = DateTime.UtcNow,
-                //AppointmentId = 0, // This will be set by the database
-            };
-
-            await _appointmentRepository.AddAsync(newAppointment);
-            await _appointmentRepository.SaveChangesAsync();
-
-            var created = await _appointmentRepository.GetWithDetailsAsync(newAppointment.AppointmentId);
-
-            if (created == null)
-            {
-                throw new InvalidOperationException("Appointment could not be loaded after saving");
-            }
-
-            return new AppointmentResponse
-            {
-                AppointmentId = created.AppointmentId,
-                UserId = created.UserId,
-                Status = created.Status.ToString(),
-                UserName = created.User?.UserName ?? string.Empty,
-                WorkerId = created.WorkerId,
-                WorkerName = created.Worker?.User?.UserName ?? string.Empty,
-                PartsRequired = created.PartsRequired,
-                ProblemDescription = created.ProblemDescription,
-                CreatedAt = created.CreatedAt,
-                //FailureReason = a.FailureReason,
-            };
-
-        }
-
-        public async Task<AppointmentResponse> AcceptAppointmentAsync(int appointmentId, int workerId)
-        {
-            //check if worker exists
-            var workers = await _genericRepository.FindAsync(w => w.UserId == workerId);
-            var worker = workers.FirstOrDefault();
-
-            if (worker==null)
-            {
-                throw new InvalidOperationException("Worker does not Exist");
-            }
-
-            //check it the worker is available or not
-
-            if (!worker.IsAvailable)
-            {
-                throw new InvalidOperationException("Worker is not available");
-            }
-
-            //check if the appointment exist
-            var appointment = await _appointmentRepository.GetWithDetailsAsync(appointmentId);
-            if(appointment == null)
-            {
-                throw new InvalidOperationException("Appointment not found");
-            }
-            //check if the appointment is pending state or not
-            if (appointment.Status != Domain.Enum.Service_Managment.Domain.Enum.Status.Pending)
-            {
-                throw new InvalidOperationException("Appointment is not in a pending state");
-            }
-
-
-            //check if the appointment is assigned to the right worker
-            if (appointment.WorkerId != worker.WorkerId)
-            {
-                throw new InvalidOperationException("This appointment is not assigned to this worker");
-            }
-
-            //Accepting the appointment
-            appointment.Status = Domain.Enum.Service_Managment.Domain.Enum.Status.Accepted;
-            worker.IsAvailable = false;
-
-            await _appointmentRepository.SaveChangesAsync();
-
-            return new AppointmentResponse
-            {
-                AppointmentId = appointment.AppointmentId,
-                UserId = appointment.UserId,
-                UserName = appointment.User?.UserName ?? string.Empty,
-                ProblemDescription = appointment.ProblemDescription,
-                PartsRequired = appointment.PartsRequired,
-                WorkerId = worker.WorkerId,
-                WorkerName = worker.User?.UserName ?? string.Empty,
-                Status = appointment.Status.ToString(),
-
-            };
-        }
-
-        public async Task<String> RejectAppointmentAsync(int appointmentId, int workerId)
-        {
-            var workers = await _genericRepository.FindAsync(w => w.UserId == workerId);
-            var worker = workers.FirstOrDefault();
-
-
-            //check appointment exists
-            var appointment = await _appointmentRepository.GetWithDetailsAsync(appointmentId);
-            if(appointment == null)
-            {
-                throw new InvalidOperationException("Appointment not found");
-            }
-
-
-            //Appointment must be in pending state to be rejected
-            if (appointment.Status != Domain.Enum.Service_Managment.Domain.Enum.Status.Pending)
-            {
-                throw new InvalidOperationException("Appointment is not in a pending state");
-            }
-
-
-            //check if the appointment is assigned to the right worker
-            if(appointment.WorkerId != worker.WorkerId)
-            {
-                throw new InvalidOperationException("This appointment is not assigned to this worker");
-            }
-
-            // reject the appointment
-            appointment.Status = Domain.Enum.Service_Managment.Domain.Enum.Status.Rejected;
-
-            //Make sure to make worker availble again
-            if (appointment.Worker != null)
-            {
-                appointment.Worker.IsAvailable = true;
-            }
-
-            await _appointmentRepository.SaveChangesAsync();
-            return "Your Appointment is rejected";
-        }
-
-        //public async Task<AppointmentResponse> StartJobAsync(int appointmentId, int workerId, string otpCode)
-        //{
-        //    throw new NotImplementedException();
-        //}
-        public async Task<AppointmentResponse> StartJobAsync([Range(1, int.MaxValue)] int appointmentId,int userId, [Required, RegularExpression(@"^\d{6}$")] string otpCode)
-        {
-            var appointment = await _appointmentRepository
-                .GetByIdAsync(appointmentId);
-
-            var workers = await _genericRepository.FindAsync(w => w.UserId == userId);
-            var worker = workers.FirstOrDefault();
-
-            if (appointment == null)
-            {
-                throw new InvalidOperationException(
-                    "Appointment does not exist");
-            }
-
-            // Get Worker using logged-in UserId
-            //var workers = await _genericRepository.FindAsync(w => w.UserId == userId);
-            //var worker = workers.FirstOrDefault();
-
-            if (worker == null)
-            {
-                throw new InvalidOperationException("Worker does not exist");
-            }
-
-            // Appointment must be accepted
-            if (appointment.Status != Status.Accepted)
-            {
-                throw new InvalidOperationException("Appointment is not Accepted yet");
-            }
-
-            // Make sure this worker owns the appointment
-            if (appointment.WorkerId != worker.WorkerId)
-            {
-                throw new InvalidOperationException("This appointment is not assigned to this worker");
-            }
-
-            // Check whether THIS worker already has another active appointment
-            var hasActiveAppointment =await _appointmentRepository.HasActiveAppointmentAsync(worker.WorkerId);
-
-            if (hasActiveAppointment)
-            {
-                throw new InvalidOperationException("Worker has an active appointment");
-            }
-
-            // OTP validation
-            // if (appointment.Otp != otpCode)
-            // {
-            //     throw new InvalidOperationException("Wrong OTP");
-            // }
-
-            appointment.Status = Status.InProgress;
-
-            await _appointmentRepository.SaveChangesAsync();
-
-            return new AppointmentResponse
-            {
-                AppointmentId = appointment.AppointmentId,
-                WorkerId = worker.WorkerId,
-                Status = appointment.Status.ToString()
-            };
-        }
-
-        public async Task<AppointmentResponse> CompleteJobAsync(int appointmentId, int workerId)
-        {
-            //checking if the appointment is valid or not
-            var appointment = await _appointmentRepository.GetAppointmentWithWorkerAsync(appointmentId);
-            if (appointment == null)
-            {
-                throw new InvalidOperationException("Appointment Does not exist");
-            }
-
-            //Checking if the job has started or not
-            if (appointment.Status != Domain.Enum.Service_Managment.Domain.Enum.Status.InProgress)
-            {
-                throw new InvalidOperationException("Start the Job First");
-            }
-
-            var JobDone = new Rating
-            {
-                //Score = appointment.RatingScore,
-                AppointmentId = appointment.AppointmentId,
-                WorkerId = appointment.WorkerId,
-                //UserId = appointment.UserId,
-                //CreatedAt = DateTime.UtcNow
-            };
-
-            appointment.Status = Domain.Enum.Service_Managment.Domain.Enum.Status.Completed;
-            appointment.Worker.IsAvailable = true;
-            await _appointmentRepository.SaveChangesAsync();
-         
-
-            return new AppointmentResponse
-            {
-                AppointmentId = appointment.AppointmentId,
-                UserId = appointment.UserId,
-                WorkerId = workerId,
-                Status = appointment.Status.ToString(),
-                //Rating = appointment.RatingDetails?.Score,
-            };
-        }
-
-        public async Task<AppointmentResponse> CannotCompleteJobAsync([Range(1, int.MaxValue)] int appointmentId, [Range(1, int.MaxValue)] int workerId, [Required, StringLength(500, MinimumLength = 10)] string reason)
-        {
-            var appointment = await _appointmentRepository.GetAppointmentWithWorkerAsync(appointmentId);
-            if (appointment == null)
-            {
-                throw new InvalidOperationException("Appointment does not exist");
-            }
-
-            if (appointment.Status != Domain.Enum.Service_Managment.Domain.Enum.Status.InProgress)
-            {
-                throw new InvalidOperationException("Accept and Start the Job First");
-            }
-
-            var failurereason = new Appointment
-            {
-                AppointmentId = appointment.AppointmentId,
-                WorkerId = appointment.WorkerId,
-                FailureReason = appointment.FailureReason
-            };
-
-            appointment.Status = Domain.Enum.Service_Managment.Domain.Enum.Status.CannotComplete;
-            appointment.Worker.IsAvailable = true;
-            await _appointmentRepository.SaveChangesAsync();
-
-            return new AppointmentResponse
-            {
-                AppointmentId = appointment.AppointmentId,
-                WorkerId = workerId,
-                Status = appointment.Status.ToString(),
-                FailureReason = appointment.FailureReason.ToString()
-            };
-        }
-
-        public async Task<AppointmentResponse> CancelAppointmentAsync(int appointmentId, int userId)
-        {
-            var appointment = await _appointmentRepository.GetAppointmentWithWorkerAsync(appointmentId);
-            if (appointment == null)
-            {
-                throw new InvalidOperationException("Appointment Does not Exist");
-            }
-            
-            if(appointment.Status != Status.Accepted
-               && appointment.Status != Status.Pending)
-            {
-                throw new InvalidOperationException("Cannot Cancel the Appointment");
-            }
-
-            var cancelappointment = new Appointment
-            {
-                AppointmentId = appointment.AppointmentId,
-                UserId = appointment.UserId,
-               
-            };
-
-            appointment.Status = Status.Cancelled;
-            appointment.Worker.IsAvailable = true;
-            await _appointmentRepository.SaveChangesAsync();
-
-            return new AppointmentResponse
-            {
-                AppointmentId = appointment.AppointmentId,
-                UserId= appointment.UserId,
-                Status = appointment.Status.ToString(),
-            };
-        }
-
-        public async Task<List<AppointmentResponse>> GetUserAppointmentsAsync(int userId)
-        {
-            var appointments = await _appointmentRepository
-                .GetUserAppointmentsAsync(userId);
-
-            return appointments.Select(a => new AppointmentResponse
-            {
-                AppointmentId = a.AppointmentId,
-                UserId = a.UserId,
-                UserName = a.User?.UserName ?? string.Empty,
-
-                WorkerId = a.WorkerId,
-                WorkerName = a.Worker?.User?.UserName ?? string.Empty,
-
-                Status = a.Status.ToString(),
-                PartsRequired = a.PartsRequired,
-                ProblemDescription = a.ProblemDescription,
-                CreatedAt = a.CreatedAt,
-                FailureReason = a.FailureReason
-            }).ToList();
-        }
-
-        public async Task<List<AppointmentResponse>> GetWorkerAppointmentsAsync(int workerId)
-        {
-            var appointments = await _appointmentRepository
-                .GetWorkerAppointmentAsync(workerId);
-
-            return appointments.Select(a => new AppointmentResponse
-            {
-                WorkerId = a.WorkerId,
-                WorkerName = a.Worker?.User?.UserName ?? string.Empty,
-                
-                AppointmentId = a.AppointmentId,
-                UserId = a.UserId,
-                UserName = a.User?.UserName ?? string.Empty,
-
-                
-                Status = a.Status.ToString(),
-                PartsRequired = a.PartsRequired,
-                ProblemDescription = a.ProblemDescription,
-                CreatedAt = a.CreatedAt,
-                //FailureReason = a.FailureReason
-            }).ToList();
-        }
-
-        public async Task GenerateOtpAsync(int appointmentId,int userId)
-        {
-            // 1. Get appointment
-            var appointment =
-                await _appointmentRepository.GetByIdAsync(appointmentId);
-
-            if (appointment == null)
-                throw new KeyNotFoundException("Appointment not found.");
-
-            // 2. Get worker using logged-in user's UserId
-            var workers = await _genericRepository.FindAsync(w => w.UserId == userId);
-
-            var worker = workers.FirstOrDefault();
-
-            if (worker == null)
-                throw new InvalidOperationException("Worker not found.");
-
-            // 3. Check worker owns appointment
-            if (appointment.WorkerId != worker.WorkerId)
-            {
-                throw new InvalidOperationException("Appointment is not assigned to this worker.");
-            }
-
-            // 4. Check appointment status
-            if (appointment.Status != Status.Accepted)
-            {
-                throw new InvalidOperationException(
-                    "Appointment is not in Accepted state.");
-            }
-
-            // 5. Generate OTP
-            var otp = GenerateOtp();
-
-            // 6. Hash OTP and store hash
-            appointment.OtpHash = HashOtp(otp);
-
-            // 7. OTP expires 5 minutes from NOW
-            appointment.OtpExpiresAt =DateTime.UtcNow.AddMinutes(5);
-
-            // 8. Reset attempts if you're using attempts
-            // appointment.OtpAttempts = 0;
-
-            // 9. Save
-            await _appointmentRepository.SaveChangesAsync();
-
-            // 10. Publish OTP + notification data to Kafka
-        }
-
-        //public async Task<List<Worker>> GetWorkerByCategoryAsync(int workerId,string Category)
-        //{
-
-        //}
-
-
-        private static AppointmentResponse MapToResponse(Appointment a)
-        {
-            return new AppointmentResponse
-            {
-                AppointmentId = a.AppointmentId,
-                UserId = a.UserId,
-                Status = a.Status.ToString(),
-                UserName = a.User?.UserName ?? string.Empty,
-                WorkerId = a.WorkerId,
-                WorkerName = a.Worker?.User?.UserName ?? string.Empty,
-                PartsRequired = a.PartsRequired,
-                ProblemDescription = a.ProblemDescription,
-                CreatedAt = a.CreatedAt,
-                //FailureReason = a.FailureReason,
-            };
-
-        }
-        private string GenerateOtp()
-        {
-            return RandomNumberGenerator
-                .GetInt32(100000, 1000000)
-                .ToString();
-        }
-
-        private string HashOtp(string otp)
-        {
-            byte[] bytes = Encoding.UTF8.GetBytes(otp);
-
-            byte[] hash = SHA256.HashData(bytes);
-
-            return Convert.ToHexString(hash);
-        }
-
-
+        _appointments = appointments;
+        _workers = workers;
+        _codes = codes;
+        _notifications = notifications;
+        _expiryMinutes = Math.Max(1, configuration.GetValue<int?>("Otp:ExpiryMinutes") ?? 30);
+        _maxAttempts = Math.Max(1, configuration.GetValue<int?>("Otp:MaxAttempts") ?? 5);
     }
+
+    public async Task<AppointmentResponse> BookAppointmentAsync(BookAppointmentRequest request, int userId)
+    {
+        var worker = await _workers.GetByIdAsync(request.WorkerId) ?? throw new KeyNotFoundException("Worker not found.");
+        if (worker.UserId == userId) throw new InvalidOperationException("You cannot book yourself.");
+        if (worker.IsBlocked || worker.VerificationStatus != VerificationStatus.Verified)
+            throw new InvalidOperationException("This worker is not approved for bookings.");
+        if (!worker.IsAvailable || await _appointments.HasActiveAppointmentAsync(worker.WorkerId))
+            throw new InvalidOperationException("This worker is currently unavailable.");
+
+        var appointment = new Appointment
+        {
+            UserId = userId, WorkerId = worker.WorkerId, ProblemDescription = request.ProblemDescription.Trim(),
+            PartsRequired = request.PartsRequired, Status = Status.Pending, CreatedAt = DateTime.UtcNow
+        };
+        await _appointments.AddAsync(appointment);
+        await _appointments.SaveChangesAsync();
+        var created = await _appointments.GetWithDetailsAsync(appointment.AppointmentId)
+            ?? throw new InvalidOperationException("The appointment could not be loaded after saving.");
+        return Map(created);
+    }
+
+    public async Task<AppointmentResponse> AcceptAppointmentAsync(int appointmentId, int userId)
+    {
+        var worker = await GetWorkerForUser(userId);
+        if (!worker.IsAvailable || worker.IsBlocked || worker.VerificationStatus != VerificationStatus.Verified)
+            throw new InvalidOperationException("Your worker profile is not available for bookings.");
+        var appointment = await GetAppointment(appointmentId);
+        if (appointment.WorkerId != worker.WorkerId) throw new UnauthorizedAccessException("This appointment belongs to another worker.");
+        if (appointment.Status != Status.Pending) throw new InvalidOperationException("Only pending appointments can be accepted.");
+        if (await _appointments.HasActiveAppointmentAsync(worker.WorkerId)) throw new InvalidOperationException("You already have an active appointment.");
+
+        appointment.Status = Status.Accepted;
+        worker.IsAvailable = false;
+        var code = GenerateCode();
+        await _codes.AddAsync(new OtpVerification
+        {
+            AppointmentId = appointment.AppointmentId, OtpHash = HashCode(code),
+            ExpiresAt = DateTime.UtcNow.AddMinutes(_expiryMinutes), IsUsed = false, FailedAttempts = 0, CreatedAt = DateTime.UtcNow
+        });
+        await _notifications.AddAsync(new Notification
+        {
+            UserId = appointment.UserId, Type = CodeNotificationPrefix + appointment.AppointmentId,
+            Message = code, Channel = NotificationChannel.Email, IsRead = false, SentAt = DateTime.UtcNow
+        });
+        await _appointments.SaveChangesAsync();
+        var result = Map(appointment);
+        result.StartCode = null;
+        return result;
+    }
+
+    public async Task<string> RejectAppointmentAsync(int appointmentId, int userId)
+    {
+        var worker = await GetWorkerForUser(userId);
+        var appointment = await GetAppointment(appointmentId);
+        EnsureWorkerOwns(appointment, worker);
+        if (appointment.Status != Status.Pending) throw new InvalidOperationException("Only pending appointments can be rejected.");
+        appointment.Status = Status.Rejected;
+        worker.IsAvailable = true;
+        await _appointments.SaveChangesAsync();
+        return "Appointment rejected.";
+    }
+
+    public async Task<AppointmentResponse> StartJobAsync(int appointmentId, int userId, string otpCode)
+    {
+        var worker = await GetWorkerForUser(userId);
+        var appointment = await GetAppointment(appointmentId);
+        EnsureWorkerOwns(appointment, worker);
+        if (appointment.Status != Status.Accepted) throw new InvalidOperationException("Accept this appointment before starting it.");
+        var records = await _codes.FindAsync(x => x.AppointmentId == appointmentId && !x.IsUsed);
+        var code = records.OrderByDescending(x => x.CreatedAt).FirstOrDefault();
+        if (code is null || code.ExpiresAt <= DateTime.UtcNow) throw new InvalidOperationException("The start code has expired. Ask the customer to cancel and rebook.");
+        if (code.FailedAttempts >= _maxAttempts) throw new InvalidOperationException("Too many incorrect start codes.");
+        if (!CryptographicOperations.FixedTimeEquals(Convert.FromHexString(code.OtpHash), Convert.FromHexString(HashCode(otpCode))))
+        {
+            code.FailedAttempts++;
+            await _codes.SaveChangesAsync();
+            throw new InvalidOperationException("The start code is incorrect.");
+        }
+        code.IsUsed = true;
+        appointment.Status = Status.InProgress;
+        await _appointments.SaveChangesAsync();
+        return Map(appointment);
+    }
+
+    public async Task<AppointmentResponse> CompleteJobAsync(int appointmentId, int userId)
+    {
+        var worker = await GetWorkerForUser(userId);
+        var appointment = await GetAppointment(appointmentId);
+        EnsureWorkerOwns(appointment, worker);
+        if (appointment.Status != Status.InProgress) throw new InvalidOperationException("Start the job before completing it.");
+        appointment.Status = Status.AwaitingPayment;
+        worker.IsAvailable = true;
+        await _appointments.SaveChangesAsync();
+        return Map(appointment);
+    }
+
+    public async Task<AppointmentResponse> CannotCompleteJobAsync(int appointmentId, int userId, string reason)
+    {
+        var worker = await GetWorkerForUser(userId);
+        var appointment = await GetAppointment(appointmentId);
+        EnsureWorkerOwns(appointment, worker);
+        if (appointment.Status != Status.InProgress) throw new InvalidOperationException("Only an in-progress job can be marked unable to complete.");
+        appointment.Status = Status.CannotComplete;
+        appointment.FailureReason = reason.Trim();
+        worker.IsAvailable = true;
+        await _appointments.SaveChangesAsync();
+        return Map(appointment);
+    }
+
+    public async Task<AppointmentResponse> CancelAppointmentAsync(int appointmentId, int userId)
+    {
+        var appointment = await GetAppointment(appointmentId);
+        if (appointment.UserId != userId) throw new UnauthorizedAccessException("This appointment belongs to another customer.");
+        if (appointment.Status is not (Status.Pending or Status.Accepted)) throw new InvalidOperationException("This appointment can no longer be cancelled.");
+        appointment.Status = Status.Cancelled;
+        var worker = appointment.Worker;
+        if (worker is not null) worker.IsAvailable = true;
+        await _appointments.SaveChangesAsync();
+        return Map(appointment);
+    }
+
+    public async Task<List<AppointmentResponse>> GetUserAppointmentsAsync(int userId)
+    {
+        var appointments = await _appointments.GetUserAppointmentsAsync(userId);
+        var notifications = await _notifications.FindAsync(n => n.UserId == userId && n.Type.StartsWith(CodeNotificationPrefix));
+        var codesByAppointment = notifications.ToDictionary(n => n.Type[CodeNotificationPrefix.Length..], n => n.Message);
+        return appointments.OrderByDescending(a => a.CreatedAt).Select(a =>
+        {
+            var result = Map(a);
+            if (a.Status == Status.Accepted && codesByAppointment.TryGetValue(a.AppointmentId.ToString(), out var code)) result.StartCode = code;
+            return result;
+        }).ToList();
+    }
+
+    public async Task<List<AppointmentResponse>> GetWorkerAppointmentsAsync(int userId)
+    {
+        var worker = await GetWorkerForUser(userId);
+        return (await _appointments.GetWorkerAppointmentAsync(worker.WorkerId)).OrderByDescending(a => a.CreatedAt).Select(Map).ToList();
+    }
+
+    private async Task<Worker> GetWorkerForUser(int userId) =>
+        (await _workers.FindAsync(w => w.UserId == userId)).SingleOrDefault() ?? throw new KeyNotFoundException("Worker profile not found.");
+    private async Task<Appointment> GetAppointment(int appointmentId) =>
+        await _appointments.GetWithDetailsAsync(appointmentId) ?? throw new KeyNotFoundException("Appointment not found.");
+    private static void EnsureWorkerOwns(Appointment appointment, Worker worker)
+    {
+        if (appointment.WorkerId != worker.WorkerId) throw new UnauthorizedAccessException("This appointment belongs to another worker.");
+    }
+    private static AppointmentResponse Map(Appointment a) => new()
+    {
+        AppointmentId = a.AppointmentId, UserId = a.UserId, UserName = a.User?.UserName ?? string.Empty,
+        WorkerId = a.WorkerId, WorkerPrice = a.Worker?.Price ?? 0m, WorkerName = a.Worker?.User?.UserName ?? string.Empty,
+        Status = a.Status.ToString(), PartsRequired = a.PartsRequired,
+        ProblemDescription = a.ProblemDescription, CreatedAt = a.CreatedAt,
+        FailureReason = string.IsNullOrWhiteSpace(a.FailureReason) ? null : a.FailureReason,
+        Rating = a.RatingDetails?.Score,
+                RatingComment = a.RatingDetails?.Review,
+                PaymentMethod = a.Payments?.FirstOrDefault(p => p.Status == PaymentStatus.Success)?.Method.ToString(),
+                PaymentStatus = a.Payments?.OrderByDescending(p => p.PaymentId).FirstOrDefault()?.Status.ToString(),
+                PaidAt = a.Payments?.FirstOrDefault(p => p.Status == PaymentStatus.Success)?.PaidAt
+    };
+    private static string GenerateCode() => RandomNumberGenerator.GetInt32(100000, 1000000).ToString();
+    private static string HashCode(string code) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(code)));
 }

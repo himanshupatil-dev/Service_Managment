@@ -1,0 +1,31 @@
+export const ENDPOINTS = {
+  login: "/api/Auth/login",
+  registerUser: "/api/Auth/register-user",
+  registerWorker: "/api/Auth/register-worker",
+  workers: "/api/Worker/search",
+  workerMe: "/api/Worker/me",
+  availability: "/api/Worker/availability",
+  bookAppointment: "/api/Appointment/book",
+  accept: (id) => `/api/Appointment/${id}/accept`,
+  reject: (id) => `/api/Appointment/${id}/reject`,
+  startJob: (id) => `/api/Appointment/${id}/start`,
+  complete: (id) => `/api/Appointment/${id}/complete`,
+  cannotComplete: (id) => `/api/Appointment/${id}/cannot-complete`,
+  cancel: (id) => `/api/Appointment/${id}/cancel`,
+  userAppointments: "/api/Appointment/user",
+  workerAppointments: "/api/Appointment/worker",
+  payment: (id) => `/api/Appointment/${id}/pay`,
+  confirmPayment: (id) => `/api/Appointment/${id}/payment/confirm`,
+  getPayment: (id) => `/api/Appointment/${id}/payment`,
+  rating: (id) => `/api/Appointment/${id}/rating`,
+  getRating: (id) => `/api/Appointment/${id}/rating`,
+  adminOverview: "/api/Admin/overview",
+  blockWorker: (id) => `/api/Admin/workers/${id}/block`,
+  verifyWorker: (id) => `/api/Admin/workers/${id}/verify`,
+};
+
+export const TOKEN_CLAIMS = {
+  userId: ["nameid", "sub", "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier"],
+  name: ["unique_name", "name", "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name"],
+  role: ["role", "http://schemas.microsoft.com/ws/2008/06/identity/claims/role"],
+};

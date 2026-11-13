@@ -16,7 +16,8 @@ namespace Service_Managment.Domain.Enum
             InProgress,
             Completed,
             Cancelled,
-            CannotComplete
+            CannotComplete,
+            AwaitingPayment
         }
     }
 }

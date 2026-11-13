@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Identity;
 using Service_Managment.Application.DTOs;
 using Service_Managment.Application.Interface;
 using Service_Managment.Domain.Entities;
@@ -78,7 +78,7 @@ namespace Service_Managment.Application.Services
                 Price = request.Price,
 
                 VerificationStatus = VerificationStatus.Pending,
-                IsAvailable = true,
+                IsAvailable = false,
                 IsBlocked = false,
                 CoinBalance = 0
             };

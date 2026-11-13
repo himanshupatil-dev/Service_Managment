@@ -1,149 +1,61 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using System.Security.Claims;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Service_Managment.Application.DTOs;
 using Service_Managment.Application.Interface;
-using Service_Managment.Application.Services;
-using System.Security.Claims;
-using System.Security.Cryptography;
-using System.Text;
 
-namespace Service_Managment.API.Controllers
+namespace Service_Managment.API.Controllers;
+
+[ApiController]
+[Route("api/[controller]")]
+[Authorize]
+public class AppointmentController : ControllerBase
 {
-    [ApiController]
-    [Route("[controller]")]
-    [Authorize]
-    public class AppointmentController : Controller
+    private readonly IAppointmentService _service;
+    public AppointmentController(IAppointmentService service) => _service = service;
+
+    [Authorize(Roles = "User")]
+    [HttpPost("book")]
+    public async Task<IActionResult> Book(BookAppointmentRequest request) => await Run(() => _service.BookAppointmentAsync(request, UserId()));
+
+    [Authorize(Roles = "Worker")]
+    [HttpPost("{id:int}/accept")]
+    public async Task<IActionResult> Accept(int id) => await Run(() => _service.AcceptAppointmentAsync(id, UserId()));
+
+    [Authorize(Roles = "Worker")]
+    [HttpPost("{id:int}/reject")]
+    public async Task<IActionResult> Reject(int id) => await Run(() => _service.RejectAppointmentAsync(id, UserId()));
+
+    [Authorize(Roles = "Worker")]
+    [HttpPost("{id:int}/start")]
+    public async Task<IActionResult> Start(int id, StartJobRequest request) => await Run(() => _service.StartJobAsync(id, UserId(), request.Otp));
+
+    [Authorize(Roles = "Worker")]
+    [HttpPost("{id:int}/complete")]
+    public async Task<IActionResult> Complete(int id) => await Run(() => _service.CompleteJobAsync(id, UserId()));
+
+    [Authorize(Roles = "Worker")]
+    [HttpPost("{id:int}/cannot-complete")]
+    public async Task<IActionResult> CannotComplete(int id, FailureReasonRequest request) => await Run(() => _service.CannotCompleteJobAsync(id, UserId(), request.FailureReason));
+
+    [Authorize(Roles = "User")]
+    [HttpPost("{id:int}/cancel")]
+    public async Task<IActionResult> Cancel(int id) => await Run(() => _service.CancelAppointmentAsync(id, UserId()));
+
+    [Authorize(Roles = "User")]
+    [HttpGet("user")]
+    public async Task<IActionResult> ForUser() => await Run(() => _service.GetUserAppointmentsAsync(UserId()));
+
+    [Authorize(Roles = "Worker")]
+    [HttpGet("worker")]
+    public async Task<IActionResult> ForWorker() => await Run(() => _service.GetWorkerAppointmentsAsync(UserId()));
+
+    private int UserId() => int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+    private static async Task<IActionResult> Run<T>(Func<Task<T>> action)
     {
-        private readonly IAppointmentService _Service;
-        public AppointmentController(IAppointmentService appointmentService)
-        {
-            _Service = appointmentService;
-        }
-
-        [Authorize]
-        [HttpPost("appointments/book")]
-        public async Task<AppointmentResponse> BookAppointmentAsync(BookAppointmentRequest request)
-        {   
-            var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
-            var result = await _Service.BookAppointmentAsync(request, userId);
-            return result;
-        }
-
-        [Authorize(Roles = "Worker")]
-        [HttpPost("appointments/{appointmentId}/accept")]
-        public async Task<AppointmentResponse> AcceptAppointmentAsync(int appointmentId)
-        {
-            var workerId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
-            var result = await _Service.AcceptAppointmentAsync(appointmentId, workerId);
-            return result;
-        }
-
-        [Authorize(Roles = "Worker")]
-        [HttpPost("appointments/reject")]
-        public async Task<string> RejectAppointmentAsync(int appointmentId, AppointmentResponse result)
-        {
-            var workerId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
-            await _Service.RejectAppointmentAsync(appointmentId, workerId);
-            return "Appointment is rejected";
-        }
-
-        [HttpPost("appointments/start-job")]
-        [Authorize(Roles = "Worker")]
-        public async Task<AppointmentResponse> StartJobAsync(int appointmentId,string otpCode)
-        {
-            var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
-
-            var result = await _Service.StartJobAsync(
-                appointmentId,
-                userId,
-                otpCode
-            );
-
-            return result;
-        }
-
-        [HttpPost("appointments/complete")]
-        [Authorize(Roles = "Worker")]
-        public async Task<AppointmentResponse> CompleteJobAsync(int appointmentId)
-        {
-            var workerId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value); 
-            var result = await _Service.CompleteJobAsync(appointmentId, workerId);
-            return result;
-
-        }
-
-
-        [HttpPost("appointments/cannot-complete")]
-        [Authorize(Roles = "Worker")]
-        public async Task<AppointmentResponse> CannotCompleteJobAsync(int appointmentId, string reason)
-        {
-            var workerId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
-            var result = await _Service.CannotCompleteJobAsync(appointmentId, workerId, reason);
-            return result;
-        }
-
-        [HttpPost("appointments/cancel-appointment")]
-        [Authorize(Roles = "User")]
-
-        public async Task<IActionResult> CancelAppointment(int appointmentId)
-        {
-            var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
-
-            var result = await _Service.CancelAppointmentAsync(appointmentId, userId);
-            return Ok(result);
-        }
-
-        [HttpGet("appointments/get-user-appointment")]
-        public async Task<List<AppointmentResponse>> GetUserAppointmentsAsync()
-        {
-            var userId = int.Parse(
-                User.FindFirst(ClaimTypes.NameIdentifier)!.Value
-            );
-
-            var result = await _Service.GetUserAppointmentsAsync(userId);
-
-            return result;
-        }
-
-
-        [HttpGet("appointments/get-worker-appointment")]
-        [AllowAnonymous]
-        public async Task<List<AppointmentResponse>> GetWorkerAppointmentsAsync()
-        {
-            var workerId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
-            var result = await _Service.GetWorkerAppointmentsAsync(workerId);
-            return result;
-        }
-
-        [Authorize(Roles = "Worker")]
-        [HttpPost("{appointmentId}/otp")]
-        public async Task<IActionResult> RequestOtp(int appointmentId)
-        {
-            var workerId = GetWorkerIdFromClaims();
-
-            await _Service.GenerateOtpAsync(
-                appointmentId,
-                workerId);
-
-            return Ok(new
-            {
-                message = "OTP has been sent to the customer."
-            });
-        }
-
-        private int GetWorkerIdFromClaims()
-        {
-            var workerIdClaim = User.FindFirst("WorkerId")?.Value;
-
-            if (string.IsNullOrEmpty(workerIdClaim))
-                throw new UnauthorizedAccessException("Worker ID not found in token.");
-
-            return int.Parse(workerIdClaim);
-        }
-
-        
-
-        
+        try { return new OkObjectResult(await action()); }
+        catch (KeyNotFoundException e) { return new NotFoundObjectResult(new { message = e.Message }); }
+        catch (UnauthorizedAccessException e) { return new ObjectResult(new { message = e.Message }) { StatusCode = 403 }; }
+        catch (InvalidOperationException e) { return new ConflictObjectResult(new { message = e.Message }); }
+    }
 }
-}
-

@@ -1,0 +1,13 @@
+**/bin/
+**/obj/
+**/node_modules/
+**/dist/
+
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+
+# Local API tooling workspaces may contain credentials or user data
+.postman/
+postman/

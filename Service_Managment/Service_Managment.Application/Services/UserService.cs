@@ -1,4 +1,4 @@
-﻿using Service_Managment.Application.DTOs;
+using Service_Managment.Application.DTOs;
 using Service_Managment.Application.Interface;
 using Service_Managment.Domain.Entities;
 using Microsoft.AspNetCore.Identity;
@@ -15,11 +15,11 @@ namespace Service_Managment.Application.Services
     public class UserService : IUserService
     {
         private readonly IGenericRepository<User> _userRepository;
-        
+
         public UserService(IGenericRepository<User> userRepository)
         {
             _userRepository = userRepository;
-            
+
         }
         public async Task<AuthResponse> RegisterUserAsync(RegisterUserRequest request)
         {
@@ -30,6 +30,7 @@ namespace Service_Managment.Application.Services
                 throw new InvalidOperationException("Email already exists");
             }
 
+            if ((await _userRepository.FindAsync(a => a.MobileNo == request.MobileNo)).Any()) throw new InvalidOperationException("Mobile number already exists.");
             var hasher = new PasswordHasher<User>();
             string hashedPassword = hasher.HashPassword(null!, request.Password);
 
@@ -60,6 +61,6 @@ namespace Service_Managment.Application.Services
             return returnuser;
         }
 
-        
+
     }
 }
